@@ -1,0 +1,14 @@
+<mujoco model="b2 nav scene">
+  <!-- Unitree's official B2 model, unmodified: same actuators, sensors and SDK
+       motor order the real robot and unitree_mujoco use. -->
+  <include file="b2.xml"/>
+  <include file="nav_world.xml"/>
+
+  <keyframe>
+    <!-- Nominal stand: the pose B2's FixStand FSM holds before handing off to the
+         RL policy, so the policy's first action is a no-op. -->
+    <key name="stand"
+      qpos="0 0 0.5435 1 0 0 0
+            0 0.8 -1.5  0 0.8 -1.5  0 0.8 -1.5  0 0.8 -1.5"/>
+  </keyframe>
+</mujoco>

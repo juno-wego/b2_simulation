@@ -1,0 +1,69 @@
+<mujoco model="nav world">
+  <!-- The hall the SLAM and Nav2 stack is exercised in, and the solver
+       settings that go with it.  Robot-free on purpose: b2_nav_scene.xml and
+       b2_arm_nav_scene.xml both include this, so the map the two robots drive
+       through cannot drift apart. -->
+  <option timestep="0.005" iterations="20" ls_iterations="20" integrator="implicitfast"/>
+
+  <statistic center="0 0 0.3" extent="6"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.35 0.35 0.35" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="-130" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4"
+      rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+    <material name="wall" rgba="0.55 0.55 0.60 1"/>
+    <material name="obstacle" rgba="0.70 0.42 0.25 1"/>
+  </asset>
+
+  <!-- Every world body sits in geom group 0.  The simulated LiDAR raycasts against
+       group 0 only, which is what keeps it from returning hits on B2's own legs.
+       density=0 because these are welded to the world: giving them real mass would
+       drag mjModel.stat.meaninertia up by orders of magnitude and make the contact
+       solver's reference scaling stiff enough to blow the robot off the floor. -->
+  <default>
+    <default class="world">
+      <geom group="0" condim="3" friction="0.9 0.005 0.0001" mass="0" density="0"/>
+    </default>
+  </default>
+
+  <worldbody>
+    <light pos="0 0 6" dir="0 0 -1" directional="true"/>
+    <light pos="8 8 6" dir="-1 -1 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane" class="world"/>
+
+    <!-- 24 x 18 m hall: closed walls give slam_toolbox and KISS-ICP loop-closure structure. -->
+    <body name="walls">
+      <geom name="wall_n" type="box" size="12 0.15 1.5" pos="0  9 1.5" material="wall" class="world"/>
+      <geom name="wall_s" type="box" size="12 0.15 1.5" pos="0 -9 1.5" material="wall" class="world"/>
+      <geom name="wall_e" type="box" size="0.15 9 1.5" pos=" 12 0 1.5" material="wall" class="world"/>
+      <geom name="wall_w" type="box" size="0.15 9 1.5" pos="-12 0 1.5" material="wall" class="world"/>
+    </body>
+
+    <!-- Interior structure: corridors and rooms, so the 2D map is not a bare rectangle. -->
+    <body name="partitions">
+      <geom name="part_1" type="box" size="0.15 3.5 1.2" pos="-4  4.5 1.2" material="wall" class="world"/>
+      <geom name="part_2" type="box" size="0.15 3.0 1.2" pos=" 3 -5.0 1.2" material="wall" class="world"/>
+      <geom name="part_3" type="box" size="4.0 0.15 1.2" pos=" 7  2.5 1.2" material="wall" class="world"/>
+      <geom name="part_4" type="box" size="2.5 0.15 1.2" pos="-8 -3.0 1.2" material="wall" class="world"/>
+    </body>
+
+    <!-- Free-standing obstacles at torso height for the costmap.  Keep the area
+         around the origin clear: that is where the robot spawns. -->
+    <body name="obstacles">
+      <geom name="pillar_1" type="cylinder" size="0.35 0.9" pos=" 0.0  4.0 0.9" material="obstacle" class="world"/>
+      <geom name="pillar_2" type="cylinder" size="0.35 0.9" pos=" 6.0 -4.0 0.9" material="obstacle" class="world"/>
+      <geom name="pillar_3" type="cylinder" size="0.35 0.9" pos="-7.0  6.5 0.9" material="obstacle" class="world"/>
+      <geom name="crate_1"  type="box" size="0.6 0.6 0.45" pos=" 4.0  5.5 0.45" material="obstacle" class="world"/>
+      <geom name="crate_2"  type="box" size="0.5 0.9 0.35" pos="-6.0  1.0 0.35" material="obstacle" class="world"/>
+      <geom name="crate_3"  type="box" size="0.9 0.5 0.55" pos=" 9.0 -6.5 0.55" material="obstacle" class="world"/>
+      <geom name="crate_4"  type="box" size="0.7 0.7 0.30" pos="-2.0 -6.0 0.30" material="obstacle" class="world"/>
+    </body>
+  </worldbody>
+</mujoco>

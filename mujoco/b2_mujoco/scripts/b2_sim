@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+# Resolved through the PATH so an activated virtualenv (the one holding mujoco and
+# onnxruntime) is used instead of the interpreter that happened to run colcon.
+from b2_mujoco.sim_node import main
+
+main()

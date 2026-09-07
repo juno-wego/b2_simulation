@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Live view of a unitree_rl_mjlab B2 training run.
+#
+#   b2_train_progress [--once] [logfile]
+#
+# train.py reports progress on stdout only, so the log lives wherever the run was
+# redirected; the newest of the conventional locations is used when none is given.
+# --once prints a single snapshot and exits, which is what you want in a script.
+
+ONCE=0
+LOG=""
+for arg in "$@"; do
+  case "$arg" in
+    --once) ONCE=1 ;;
+    *) LOG="$arg" ;;
+  esac
+done
+
+RUNS=/home/juno/unitree_rl_mjlab/logs/rsl_rl/b2_velocity
+
+if [ -z "$LOG" ]; then
+  LOG=$(ls -t \
+        "$RUNS"/train.log \
+        /home/juno/unitree_rl_mjlab/b2_train.log \
+        /tmp/claude-*/*/*/scratchpad/b2_train.log \
+        2>/dev/null | head -1)
+fi
+if [ -z "$LOG" ] || [ ! -f "$LOG" ]; then
+  echo "no training log found; pass one explicitly: b2_train_progress <logfile>" >&2
+  exit 1
+fi
+
+# Split on the FIRST colon only: values like "01:16:26" contain colons themselves.
+field () {
+  grep -E "^ *$1:" <<<"$BLOCK" | tail -1 | cut -d: -f2- |
+    tr -d '\r' | sed -E 's/^ +//; s/ +$//'
+}
+
+render () {
+  BLOCK=$(tail -120 "$LOG")
+  local iter cur tot pct fill bar newest
+  iter=$(grep -oE "Learning iteration [0-9]+/[0-9]+" <<<"$BLOCK" | tail -1)
+  cur=${iter#Learning iteration }; cur=${cur%%/*}
+  tot=${iter##*/}
+
+  echo "  Unitree-B2-Flat  ·  $(date '+%H:%M:%S')"
+  echo "  log: $LOG"
+  echo
+  if [ -n "$cur" ] && [ -n "$tot" ] && [ "$tot" -gt 0 ] 2>/dev/null; then
+    pct=$(( cur * 100 / tot ))
+    fill=$(( pct * 48 / 100 ))
+    bar=$(printf '%*s' "$fill" '' | tr ' ' '#')$(printf '%*s' $(( 48 - fill )) '' | tr ' ' '.')
+    printf "  [%s] %3d%%   %s / %s\n\n" "$bar" "$pct" "$cur" "$tot"
+  else
+    printf "  waiting for the first iteration...\n\n"
+  fi
+
+  printf "  %-22s %s\n" "elapsed"          "$(field 'Time elapsed')"
+  printf "  %-22s %s\n" "remaining (ETA)"  "$(field 'ETA')"
+  printf "  %-22s %s\n" "iteration time"   "$(field 'Iteration time')"
+  printf "  %-22s %s\n" "steps per second" "$(field 'Steps per second')"
+  echo
+  printf "  %-22s %s\n" "mean reward"      "$(field 'Mean reward')"
+  printf "  %-22s %s / 1000\n" "episode length" "$(field 'Mean episode length')"
+  printf "  %-22s %s\n" "action std"       "$(field 'Mean action std')"
+  echo
+  echo "  velocity tracking error   (lower is better)"
+  printf "    %-20s %s\n" "linear  xy"      "$(field 'Metrics/twist/error_vel_xy')"
+  printf "    %-20s %s\n" "angular yaw"     "$(field 'Metrics/twist/error_vel_yaw')"
+  echo
+  echo "  termination share"
+  printf "    %-20s %s\n" "fell over"       "$(field 'Episode_Termination/fell_over')"
+  printf "    %-20s %s\n" "illegal contact" "$(field 'Episode_Termination/illegal_contact')"
+  echo
+
+  newest=$(ls -dt "$RUNS"/*/ 2>/dev/null | head -1)
+  if [ -n "$newest" ] && [ -f "$newest/policy.onnx" ]; then
+    printf "  latest export  %s  (%s)\n" \
+      "$(basename "$newest")/policy.onnx" "$(date -r "$newest/policy.onnx" '+%H:%M:%S')"
+  fi
+}
+
+if [ "$ONCE" = 1 ]; then
+  render
+  exit 0
+fi
+
+trap 'tput cnorm 2>/dev/null; echo; exit 0' INT TERM
+tput civis 2>/dev/null
+
+while true; do
+  clear
+  render
+  if ! pgrep -f "scripts/train.py Unitree-B2-Flat" >/dev/null; then
+    echo
+    echo "  training process is no longer running (finished or stopped)."
+    tput cnorm 2>/dev/null
+    exit 0
+  fi
+  echo
+  echo "  Ctrl-C closes this view; training keeps running."
+  sleep 5
+done

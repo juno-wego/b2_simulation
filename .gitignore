@@ -1,0 +1,43 @@
+# ---- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+
+# ---- RL training output -----------------------------------------------------
+# Training runs under unitree_rl_mjlab, but these land here if it is ever run
+# from this directory.  Checkpoints are hundreds of MB per run.
+logs/
+wandb/
+*.pt
+outputs/
+
+# ---- simulator / navigation output ------------------------------------------
+# Maps and rosbags are experiment results, not sources.
+*.pgm
+*.posegraph
+*.posegraph.data
+*.db3
+*.mcap
+rosbag2_*/
+
+# MuJoCo viewer captures
+*.mp4
+frames_*.gv
+frames_*.pdf
+
+# ---- editors and OS ---------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Tracked on purpose:
+#   mujoco/b2_mujoco/policy/*.onnx        the trained B2 velocity policy (760 KB).
+#                                         Nothing runs without it, so it ships.
+#   mujoco/b2_mujoco/models/assets/*      B2 meshes (31 MB) copied from
+#                                         unitree_mujoco, so the package works
+#                                         standalone after a clone.
