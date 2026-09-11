@@ -12,8 +12,6 @@ Unitree B2 시뮬레이션. 목적이 두 가지다.
 | 디렉터리 | 시뮬레이터 | 상태 |
 |---|---|---|
 | [`mujoco/`](mujoco/) | MuJoCo | **동작함** — 실기 대체 + RL 학습 |
-| [`gazebo/`](gazebo/) | Gazebo Sim | 자리표시자 |
-| [`isaacsim/`](isaacsim/) | Isaac Sim | 자리표시자 |
 
 ## 인터페이스
 
