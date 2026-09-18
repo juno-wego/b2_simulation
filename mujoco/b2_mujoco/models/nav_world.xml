@@ -1,7 +1,7 @@
 <mujoco model="nav world">
   <!-- The hall the SLAM and Nav2 stack is exercised in, and the solver
        settings that go with it.  Robot-free on purpose: b2_nav_scene.xml and
-       b2_arm_nav_scene.xml both include this, so the map the two robots drive
+       b2_nav_scene.xml includes this, so the map the robot drives
        through cannot drift apart. -->
   <option timestep="0.005" iterations="20" ls_iterations="20" integrator="implicitfast"/>
 

@@ -97,8 +97,6 @@ class B2MujocoSim(Node):
     self.declare_parameter("lidar_range_max", 30.0)
     self.declare_parameter("state_rate_hz", 200.0)
     self.declare_parameter("battery_topic", "/b2/battery_state")
-    self.declare_parameter("arm_state_topic", "/fr3/joint_states")
-    self.declare_parameter("arm_command_topic", "/fr3/joint_command")
     # B2 ships a 58 V 45 Ah pack. Capacity and idle draw are the only figures
     # here that are not measured from the simulation itself; everything else
     # comes out of MuJoCo. See _publish_battery.
@@ -197,58 +195,6 @@ class B2MujocoSim(Node):
         durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
       ),
     )
-    # The arm is only present in the scene that carries it. Everything below
-    # checks `self._arm_joints` and does nothing when the robot is bare, so one
-    # node serves both scenes - the control station cannot tell which is
-    # running except by the arm channel falling silent, which state/health
-    # already reports.
-    self._arm_joints = [
-      j for j in (
-        mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, i)
-        for i in range(self.model.njnt)
-      ) if j and j.startswith("fr3_")
-    ]
-    self._arm_qadr = [
-      self.model.jnt_qposadr[mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, j)]
-      for j in self._arm_joints
-    ]
-    self._arm_vadr = [
-      self.model.jnt_dofadr[mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, j)]
-      for j in self._arm_joints
-    ]
-    self._arm_actadr = [
-      mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, j)
-      for j in self._arm_joints
-    ]
-    self._arm_target = [float(self.data.qpos[a]) for a in self._arm_qadr]
-
-    self.arm_state_pub = None
-    if self._arm_joints:
-      # RELIABLE, not the sensor profile the rest of this node uses. The
-      # bridge and MoveIt2 both subscribe reliably, and a BEST_EFFORT publisher
-      # is simply invisible to them — the same QoS mismatch that once left the
-      # ground segmenter with no point cloud and no error.
-      self.arm_state_pub = self.create_publisher(
-        JointState,
-        self.get_parameter("arm_state_topic").value,
-        QoSProfile(
-          history=QoSHistoryPolicy.KEEP_LAST,
-          depth=10,
-          reliability=QoSReliabilityPolicy.RELIABLE,
-        ),
-      )
-      self.create_subscription(
-        JointState,
-        self.get_parameter("arm_command_topic").value,
-        self._on_arm_command,
-        10,
-      )
-      self.get_logger().info(
-        f"FR3 팔 {len(self._arm_joints)}축: "
-        f"{self.get_parameter('arm_command_topic').value} -> "
-        f"{self.get_parameter('arm_state_topic').value}"
-      )
-
     self.clock_pub = (
       self.create_publisher(Clock, "/clock", 10)
       if self.get_parameter("publish_clock").value
@@ -527,32 +473,6 @@ class B2MujocoSim(Node):
     tau = kp * (q_des - q) + kd * (dq_des - dq) + tau_ff
     d.ctrl[self._ctrl_adr] = np.clip(tau, -self._torque_limit, self._torque_limit)
 
-  def _on_arm_command(self, msg: JointState) -> None:
-    """Take a joint target for the arm, by name.
-
-    Matched by name rather than by index because the sender is MoveIt2 or a
-    teach panel, and neither guarantees the order this model happens to use.
-    Positions outside the joint's range are clamped: the real controller
-    refuses them, and letting the simulator reach somewhere the robot cannot
-    would make the station's preview a lie.
-    """
-    for name, q in zip(msg.name, msg.position):
-        if name not in self._arm_joints:
-            continue
-        k = self._arm_joints.index(name)
-        jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
-        lo, hi = self.model.jnt_range[jid]
-        self._arm_target[k] = float(min(max(q, lo), hi))
-
-  def _publish_arm_state(self) -> None:
-    msg = JointState()
-    msg.header.stamp = self._sim_time()
-    msg.name = list(self._arm_joints)
-    msg.position = [float(self.data.qpos[a]) for a in self._arm_qadr]
-    msg.velocity = [float(self.data.qvel[a]) for a in self._arm_vadr]
-    msg.effort = [float(self.data.qfrc_actuator[a]) for a in self._arm_vadr]
-    self.arm_state_pub.publish(msg)
-
   def _drain_battery(self) -> None:
     """Integrate one step of energy out of the pack.
 
@@ -598,8 +518,6 @@ class B2MujocoSim(Node):
     next_wall = time.perf_counter()
     while self._running:
       self._apply_control()
-      for k, a in enumerate(self._arm_actadr):
-        self.data.ctrl[a] = self._arm_target[k]
       mujoco.mj_step(self.model, self.data)
       step += 1
 
@@ -612,8 +530,6 @@ class B2MujocoSim(Node):
         self._publish_low_state()
       if step % self._battery_decim == 0:
         self._publish_battery()
-      if self.arm_state_pub is not None and step % self._state_decim == 0:
-        self._publish_arm_state()
       if step % self._lidar_decim == 0:
         self._publish_points()
       if self._viewer is not None and step % 4 == 0:

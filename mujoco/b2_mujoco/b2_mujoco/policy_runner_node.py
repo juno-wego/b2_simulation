@@ -96,15 +96,10 @@ class B2PolicyRunner(Node):
 
     policy_file = self.get_parameter("policy_file").value
     if not Path(policy_file).is_file():
-      # b2_velocity.onnx and b2_arm_velocity.onnx come from different tasks and
-      # different log directories, so point at the right one.
-      arm = "arm" in Path(policy_file).stem
-      task = "Unitree-B2Arm-Flat" if arm else "Unitree-B2-Flat"
-      experiment = "b2_arm_velocity" if arm else "b2_velocity"
       raise RuntimeError(
         f"policy not found: {policy_file}\n"
-        f"Train one with:  python scripts/train.py {task}  (unitree_rl_mjlab)\n"
-        f"then copy its logs/rsl_rl/{experiment}/<run>/policy.onnx to that path."
+        "Train one with: python scripts/train.py Unitree-B2-Flat "
+        "(unitree_rl_mjlab), then copy its policy.onnx to that path."
       )
     self._load_policy(policy_file)
 

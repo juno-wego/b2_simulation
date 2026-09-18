@@ -253,17 +253,15 @@ LiDAR에 보인다.
 
 ## 씬
 
-씬 파일은 세 개다. 홀은 한 군데에만 있다.
+씬 파일은 두 개다. 홀은 한 군데에만 있다.
 
 ```
 models/nav_world.xml           24 x 18 m 실내 홀 + 솔버 설정 (로봇 없음)
 models/b2_nav_scene.xml        b2.xml      + nav_world.xml
-models/b2_arm_nav_scene.xml    b2_arm.xml  + nav_world.xml
 ```
 
 SLAM이 루프 클로저를 걸 만한 구조(벽, 칸막이, 기둥, 상자)가 있어야 하기 때문에
-빈 평면이 아니다. 두 로봇이 **같은 홀**을 돌아야 비교가 되므로 홀은 복제하지 않고
-`nav_world.xml` 하나로 공유한다.
+빈 평면이 아니다. 홀은 복제하지 않고 `nav_world.xml` 하나로 공유한다.
 
 씬을 고칠 때 두 가지를 지켜야 한다.
 
@@ -274,40 +272,6 @@ SLAM이 루프 클로저를 걸 만한 구조(벽, 칸막이, 기둥, 상자)가
   수십 개의 접촉이 생겨 로봇이 날아간다.
 
 다른 씬을 쓰려면 `scene_file:=/abs/path.xml`. 씬에는 `stand` 키프레임이 있어야 한다.
-
-## FR3 팔을 얹은 B2
-
-등에 FAIRINO FR3 협동로봇(자중 15 kg, 가반 3 kg, 리치 622 mm)을 얹은 구성이다.
-컨트롤 박스·마운트·DC-DC까지 **21.5 kg**, 총 105.0 kg. B2의 이동 정격 40 kg 안이다.
-
-```bash
-SHARE=$(ros2 pkg prefix b2_mujoco)/share/b2_mujoco
-ros2 launch b2_mujoco b2_sim.launch.py \
-    scene_file:=$SHARE/models/b2_arm_nav_scene.xml \
-    policy_file:=$SHARE/policy/b2_arm_velocity.onnx
-```
-
-**정책과 모델은 반드시 짝을 맞춰야 한다.** `b2_velocity.onnx`는 83.5 kg 로봇용이고
-`b2_arm_velocity.onnx`는 105 kg 로봇용이다. 서로 바꿔 넣으면 학습한 적 없는 무게중심을
-만나게 된다.
-
-`models/b2_arm.xml`은 손으로 쓴 파일이 아니라 `b2.xml`에서 생성된다. 학습 에셋을
-만드는 것과 **같은 스크립트**다.
-
-```bash
-python3 ../rl_training/tools/make_b2_arm_asset.py \
-    --deploy-in models/b2.xml --deploy-out models/b2_arm.xml
-```
-
-팔은 트렁크 중심보다 5 cm 뒤(x = −0.05)에 얹었다. 전방 LiDAR 마스트가 x = +0.342에
-있어서, 그보다 앞에 두면 스캔을 가린다. 다만 시뮬레이터 LiDAR는 group 0(월드) 만
-레이캐스트하므로 **팔에 의한 가림은 지금 모델에 없다.** 실기에서는 후방 일부가
-가려질 수 있다.
-
-팔 자체는 관절 없는 강체 두 개(`payload_deck`, `fr3_arm`)다. 팔을 실제로 움직이는
-제어는 이 패키지 밖(젯슨의 FR3 드라이버)이고, 걷기 정책은 팔의 움직임을 관절각이
-아니라 도메인 랜덤화로 흡수하도록 학습했다. 자세한 내용은
-`rl_training/README.md`의 "B2 + FR3" 절.
 
 ## 기동 시퀀스
 
