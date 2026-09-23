@@ -21,7 +21,7 @@ setup(
     install_requires=["setuptools"],
     zip_safe=True,
     maintainer="juno",
-    maintainer_email="hw.jo@wego-robotics.com",
+    maintainer_email="junoyoo@wego-robotics.com",
     description="MuJoCo B2 simulation with an RL velocity policy for Nav2 SLAM.",
     license="Apache-2.0",
     # Plain scripts rather than console_scripts: these keep a `#!/usr/bin/env
