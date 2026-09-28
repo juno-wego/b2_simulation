@@ -176,6 +176,25 @@ RViz에서 `Nav2 Goal`로 목표를 찍으면 Nav2가 `/cmd_vel`을 내고, 정�
 `ground_truth_tf`는 이 스택에서 자동으로 꺼진다. `odom → base_link`는 KISS-ICP가
 소유하며, 한 변에 publisher가 둘이면 TF 트리가 깨진다.
 
+### 경사·요철 코스
+
+`b2_terrain_course_scene.xml`은 B2 본체와 `terrain_course.xml` 환경을 묶은 테스트
+장면이다. 로봇은 언덕 앞 평지 `(-12, 0)`에서 시작한다. 기본 `b2_nav_scene.xml`은
+그대로 유지한다. `terrain_course.xml`은 패키지 안에 포함되므로 Desktop 파일에
+의존하지 않는다.
+
+SLAM과 Nav2를 함께 띄우고 RViz에서 지도·경로를 보려면 `simulation_bringup`에
+저장 지도를 비워 전달하고 이 장면을 지정한다.
+
+```bash
+ros2 launch simulation_bringup bringup.launch.py \
+  scene_file:="$(ros2 pkg prefix b2_mujoco)/share/b2_mujoco/models/b2_terrain_course_scene.xml" \
+  'map:= ' slam:=true nav2:=true rviz_profile:=slam_nav2
+```
+
+`slam_nav2` RViz 프로필은 SLAM 지도와 Nav2 경로·goal 도구를 함께 표시한다.
+맵핑 주행은 HMI를 `127.0.0.1:9090`에 연결한 뒤 수동 주행으로 진행한다.
+
 ## 검증 결과
 
 아래는 학습 1300 iteration 시점의 중간 정책으로 측정한 값이다. 최종 정책은 이보다

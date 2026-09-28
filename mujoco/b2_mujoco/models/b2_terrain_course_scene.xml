@@ -1,0 +1,11 @@
+<mujoco model="b2 terrain course">
+  <include file="b2.xml"/>
+  <include file="terrain_course.xml"/>
+
+  <keyframe>
+    <!-- Start on the flat ground before the hill, clear of the west wall. -->
+    <key name="stand"
+      qpos="-12 0 0.5435 1 0 0 0
+            0 0.8 -1.5 0 0.8 -1.5 0 0.8 -1.5 0 0.8 -1.5"/>
+  </keyframe>
+</mujoco>
