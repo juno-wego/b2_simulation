@@ -14,6 +14,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -31,6 +32,9 @@ def generate_launch_description():
                 "scene_file": LaunchConfiguration("scene_file"),
                 "viewer": LaunchConfiguration("viewer"),
                 "publish_ground_truth_tf": LaunchConfiguration("ground_truth_tf"),
+                "front_camera_enabled": ParameterValue(
+                    LaunchConfiguration("front_camera"), value_type=bool
+                ),
             },
         ],
     )
@@ -64,6 +68,11 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "viewer", default_value="true", description="Open the MuJoCo viewer window."
+        ),
+        DeclareLaunchArgument(
+            "front_camera",
+            default_value="false",
+            description="Publish the simulated front RGB camera and CameraInfo.",
         ),
         DeclareLaunchArgument(
             "ground_truth_tf",
