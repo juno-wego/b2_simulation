@@ -11,11 +11,14 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
+        ("share/" + package_name + "/docs", ["README_camera.md"]),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
         ("share/" + package_name + "/config", glob("config/*.yaml")),
         ("share/" + package_name + "/rviz", glob("rviz/*.rviz")),
         ("share/" + package_name + "/models", glob("models/*.xml")),
         ("share/" + package_name + "/models/assets", glob("models/assets/*")),
+        # MJCF texture references preserve the existing leading-space directory.
+        ("share/" + package_name + "/models/ tags", glob("models/ tags/*.png")),
         ("share/" + package_name + "/policy", glob("policy/*.onnx")),
     ],
     install_requires=["setuptools"],

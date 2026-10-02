@@ -1,0 +1,27 @@
+<mujoco model="b2 tag test">
+  <!-- Reuse the existing B2, navigation world and required stand keyframe. -->
+  <include file="b2_nav_scene.xml"/>
+
+  <asset>
+    <!-- The existing directory is named " tags", with a leading space. -->
+    <texture name="dock_tag_texture" type="2d"
+             file=" tags/tag36_11_00000.png"/>
+    <material name="dock_tag_material" texture="dock_tag_texture"
+              texrepeat="1 1" texuniform="false"
+              specular="0" reflectance="0"/>
+  </asset>
+
+  <worldbody>
+    <!-- Temporary visual-test pose in MuJoCo world coordinates, not ROS map. -->
+    <body name="dock_tag_panel" pos="2 0 0.6">
+      <!-- Upright 0.32 m square; local +Z faces world -X, toward the spawn.
+           A plane is infinite for collision/ray tests: disable contacts and
+           exclude it from the simulator's group-0 LiDAR raycasts. The third
+           size value is rendering grid spacing, not panel thickness. -->
+      <geom name="dock_tag_surface" type="plane"
+            size="0.16 0.16 0.1" xyaxes="0 -1 0 0 0 1"
+            material="dock_tag_material"
+            contype="0" conaffinity="0" group="2" mass="0"/>
+    </body>
+  </worldbody>
+</mujoco>

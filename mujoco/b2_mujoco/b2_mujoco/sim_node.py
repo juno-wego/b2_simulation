@@ -36,11 +36,18 @@ from rclpy.qos import (
   QoSReliabilityPolicy,
 )
 from rosgraph_msgs.msg import Clock
-from sensor_msgs.msg import BatteryState, Imu, JointState, PointCloud2, PointField
+from sensor_msgs.msg import BatteryState, CameraInfo, Image, Imu, JointState, PointCloud2, PointField
 from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 from unitree_go.msg import LowCmd, LowState
 
 from b2_mujoco.lidar import RaycastLidar
+from b2_mujoco.front_camera import (
+  FrontCameraConfig,
+  LatestFrameRenderer,
+  NOMINAL_CAMERA_OFFSET,
+  OPTICAL_QUATERNION_XYZW,
+  load_model,
+)
 
 NUM_MOTORS = 12
 
@@ -113,11 +120,35 @@ class B2MujocoSim(Node):
     self.declare_parameter("startup_hold_kd", 10.0)
     self.declare_parameter("realtime_factor", 1.0)
     self.declare_parameter("viewer", True)
+    self.declare_parameter("front_camera_enabled", False)
+    self.declare_parameter("front_camera_width", 640)
+    self.declare_parameter("front_camera_height", 480)
+    self.declare_parameter("front_camera_rate_hz", 10.0)
+    self.declare_parameter("front_camera_fovy", 60.0)
+    self.declare_parameter("front_camera_offset", list(NOMINAL_CAMERA_OFFSET))
+    self.declare_parameter("front_camera_image_topic", "/b2/front_camera/image_raw")
+    self.declare_parameter("front_camera_info_topic", "/b2/front_camera/camera_info")
+    self.declare_parameter("front_camera_link", "b2/front_camera_link")
+    self.declare_parameter("front_camera_optical_frame", "b2/front_camera_optical_frame")
+    self._front_camera_link = self.get_parameter("front_camera_link").value
+    self._front_camera_optical_frame = self.get_parameter("front_camera_optical_frame").value
+
+    self._front_camera_config = None
+    if self.get_parameter("front_camera_enabled").value:
+      self._front_camera_config = FrontCameraConfig(
+        width=self.get_parameter("front_camera_width").value,
+        height=self.get_parameter("front_camera_height").value,
+        rate_hz=self.get_parameter("front_camera_rate_hz").value,
+        fovy_deg=self.get_parameter("front_camera_fovy").value,
+        offset=self.get_parameter("front_camera_offset").value,
+      )
 
     scene_file = self.get_parameter("scene_file").value
-    self.model = mujoco.MjModel.from_xml_path(scene_file)
+    self.model = load_model(scene_file, self._front_camera_config)
     self.data = mujoco.MjData(self.model)
     self.dt = float(self.model.opt.timestep)
+    if self._front_camera_config is not None and self._front_camera_config.rate_hz > 1.0 / self.dt:
+      raise ValueError("front camera rate must not exceed the physics step rate")
 
     key = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_KEY, "stand")
     if key < 0:
@@ -181,6 +212,18 @@ class B2MujocoSim(Node):
     self.imu_pub = self.create_publisher(
       Imu, self.get_parameter("imu_topic").value, sensor_qos
     )
+    self._front_camera_renderer = None
+    self._front_camera_capture_enabled = self._front_camera_config is not None
+    if self._front_camera_config is not None:
+      self.front_image_pub = self.create_publisher(
+        Image, self.get_parameter("front_camera_image_topic").value, sensor_qos
+      )
+      self.front_info_pub = self.create_publisher(
+        CameraInfo, self.get_parameter("front_camera_info_topic").value, sensor_qos
+      )
+      self._front_camera_renderer = LatestFrameRenderer(
+        self.model, self._front_camera_config, self._publish_front_camera
+      )
     self.joint_pub = self.create_publisher(
       JointState, self.get_parameter("joint_state_topic").value, sensor_qos
     )
@@ -233,14 +276,32 @@ class B2MujocoSim(Node):
     self._battery_draw_w = 0.0
 
     self._viewer = None
-    if self.get_parameter("viewer").value:
-      # Imported lazily so a headless run needs no windowing system.  Bound under
-      # its own name: `import mujoco.viewer` here would make `mujoco` a local.
-      from mujoco import viewer as mj_viewer
+    try:
+      # GL context creation, use and cleanup all belong to the camera worker.
+      # No live-state snapshots are submitted until that worker is ready.
+      if self._front_camera_renderer is not None:
+        self._front_camera_renderer.start()
+        self.get_logger().info(
+          f"Front camera enabled: {self._front_camera_config.width}x"
+          f"{self._front_camera_config.height} @ {self._front_camera_config.rate_hz:g} Hz, "
+          f"frame={self._front_camera_optical_frame}"
+        )
+      if self.get_parameter("viewer").value:
+        # Bound under its own name: importing mujoco.viewer here would make
+        # mujoco a local. Headless runs do not need the passive viewer.
+        from mujoco import viewer as mj_viewer
 
-      self._viewer = mj_viewer.launch_passive(
-        self.model, self.data, show_left_ui=False, show_right_ui=False
-      )
+        self._viewer = mj_viewer.launch_passive(
+          self.model, self.data, show_left_ui=False, show_right_ui=False
+        )
+    except BaseException:
+      # A failed viewer startup must not leave the camera context/thread alive.
+      if self._front_camera_renderer is not None:
+        try:
+          self._front_camera_renderer.stop()
+        except TimeoutError as exc:
+          self.get_logger().error(str(exc))
+      raise
 
     self._running = True
     self._thread = threading.Thread(target=self._physics_loop, daemon=True)
@@ -306,7 +367,62 @@ class B2MujocoSim(Node):
     tf.transform.translation.y = float(offset[1])
     tf.transform.translation.z = float(offset[2])
     tf.transform.rotation.w = 1.0
-    self.static_tf_broadcaster.sendTransform(tf)
+    transforms = [tf]
+    if self._front_camera_config is not None:
+      camera_link = self._front_camera_link
+      mount = TransformStamped()
+      mount.header.stamp = tf.header.stamp
+      mount.header.frame_id = self.get_parameter("base_frame").value
+      mount.child_frame_id = camera_link
+      x, y, z = self._front_camera_config.offset
+      mount.transform.translation.x = x
+      mount.transform.translation.y = y
+      mount.transform.translation.z = z
+      mount.transform.rotation.w = 1.0
+      transforms.append(mount)
+
+      optical = TransformStamped()
+      optical.header.stamp = tf.header.stamp
+      optical.header.frame_id = camera_link
+      optical.child_frame_id = self._front_camera_optical_frame
+      x, y, z, w = OPTICAL_QUATERNION_XYZW
+      optical.transform.rotation.x = x
+      optical.transform.rotation.y = y
+      optical.transform.rotation.z = z
+      optical.transform.rotation.w = w
+      transforms.append(optical)
+    self.static_tf_broadcaster.sendTransform(transforms)
+
+  def _publish_front_camera(self, rgb: np.ndarray, sim_time: float) -> None:
+    """Publish a matched pair stamped at snapshot capture, not render finish."""
+    if not self._running or not rclpy.ok(context=self.context):
+      return
+    config = self._front_camera_config
+    stamp = TimeMsg()
+    stamp.sec = int(sim_time)
+    stamp.nanosec = int((sim_time - stamp.sec) * 1e9)
+    image = Image()
+    image.header.stamp = stamp
+    image.header.frame_id = self._front_camera_optical_frame
+    image.height = config.height
+    image.width = config.width
+    image.encoding = "rgb8"
+    image.is_bigendian = False
+    image.step = config.width * 3
+    image.data = np.ascontiguousarray(rgb).tobytes()
+
+    fx, fy, cx, cy = config.intrinsics
+    info = CameraInfo()
+    info.header = image.header
+    info.height = config.height
+    info.width = config.width
+    info.distortion_model = "plumb_bob"
+    info.d = [0.0] * 5
+    info.k = [fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]
+    info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    info.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
+    self.front_image_pub.publish(image)
+    self.front_info_pub.publish(info)
 
   def _on_low_cmd(self, msg: LowCmd) -> None:
     q = np.empty(NUM_MOTORS)
@@ -516,6 +632,7 @@ class B2MujocoSim(Node):
     rtf = max(1e-3, float(self.get_parameter("realtime_factor").value))
     step = 0
     next_wall = time.perf_counter()
+    next_camera_time = float(self.data.time)
     while self._running:
       self._apply_control()
       mujoco.mj_step(self.model, self.data)
@@ -532,6 +649,15 @@ class B2MujocoSim(Node):
         self._publish_battery()
       if step % self._lidar_decim == 0:
         self._publish_points()
+      if self._front_camera_capture_enabled and self.data.time + 1e-9 >= next_camera_time:
+        try:
+          # Only this physics thread copies the live state. The render worker
+          # owns a separate MjData and replaces old pending frames, not queues.
+          self._front_camera_renderer.submit(self.data)
+        except RuntimeError as exc:
+          self.get_logger().error(f"Front camera output disabled: {exc}")
+          self._front_camera_capture_enabled = False
+        next_camera_time = float(self.data.time) + 1.0 / self._front_camera_config.rate_hz
       if self._viewer is not None and step % 4 == 0:
         if not self._viewer.is_running():
           self._running = False
@@ -550,7 +676,11 @@ class B2MujocoSim(Node):
   def destroy_node(self) -> bool:
     self._running = False
     if self._thread.is_alive():
-      self._thread.join(timeout=1.0)
+      self._thread.join(timeout=5.0)
+    if self._front_camera_renderer is not None:
+      self._front_camera_renderer.stop()
+    if self._thread.is_alive():
+      raise TimeoutError("physics worker did not stop; simulator resources remain alive")
     if self._viewer is not None:
       self._viewer.close()
     return super().destroy_node()
@@ -558,14 +688,18 @@ class B2MujocoSim(Node):
 
 def main() -> None:
   rclpy.init()
-  node = B2MujocoSim()
+  node = None
   try:
+    node = B2MujocoSim()
     rclpy.spin(node)
   except (KeyboardInterrupt, ExternalShutdownException):
     pass
   finally:
-    node.destroy_node()
-    rclpy.try_shutdown()
+    try:
+      if node is not None:
+        node.destroy_node()
+    finally:
+      rclpy.try_shutdown()
 
 
 if __name__ == "__main__":
