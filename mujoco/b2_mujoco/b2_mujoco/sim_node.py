@@ -510,10 +510,11 @@ class B2MujocoSim(Node):
     d = self.data
     pos = d.xpos[self._base_bid]
     quat = d.xquat[self._base_bid]
-    # Body-frame twist at the base frame's own origin.  d.cvel would give the
-    # subtree-CoM velocity in world axes instead, which differs by omega x r.
+    # XBODY uses base_link's own axes and origin, matching child_frame_id below.
+    # BODY instead uses the body's rotated/offset inertial frame; d.cvel uses
+    # world axes at the subtree CoM.  Neither is the ROS base-frame twist.
     mujoco.mj_objectVelocity(
-      self.model, d, mujoco.mjtObj.mjOBJ_BODY, self._base_bid, self._twist, 1
+      self.model, d, mujoco.mjtObj.mjOBJ_XBODY, self._base_bid, self._twist, 1
     )
     ang, lin = self._twist[0:3], self._twist[3:6]
 
