@@ -183,13 +183,31 @@ RViz에서 `Nav2 Goal`로 목표를 찍으면 Nav2가 `/cmd_vel`을 내고, 정�
 그대로 유지한다. `terrain_course.xml`은 패키지 안에 포함되므로 Desktop 파일에
 의존하지 않는다.
 
+언덕은 두 경사판 대신 **높이맵으로 만든 둥근 지형**이다. 정상은 `(-3, 0)`의
+높이 **0.6 m**, 지면과 만나는 범위는 X `-10~4 m`, Y `-4.4~4.4 m`이다.
+평지에서 경사가 서서히 커졌다가 정상에서 다시 0으로 줄고, 측면도 둥글게 내려온다.
+원래 곡면은 평지와 높이·기울기·곡률이 연속이며, MuJoCo는 이를 **0.2 m 격자**로
+샘플링해 표시·접촉·LiDAR에 공통으로 사용한다. 최대 경사는 전진 방향 **8.4°**,
+측면 방향 **13.2°**다. 바닥 전체가 하나의 높이맵이므로 평면과 중복 접촉하지 않는다.
+
+높이만 바꾸려면 `terrain_course.xml`의 `course_height`에서 `size="16 8 0.6 0.2"`의
+세 번째 값을 수정한다. 언덕 중심·길이·폭은 `tools/generate_terrain_course.py`의
+`HILL_CENTER`, `HILL_RADII`에서 바꾸고 패키지 디렉터리에서 아래 명령을 실행한다.
+생성기는 정규화된 높이 데이터를 XML의 `elevation` 속성에 직접 기록한다.
+추가 파일이나 런타임 생성 과정 없이 기존 scene 명령으로 실행할 수 있다.
+`--symlink-install` 환경에서는 수정된 XML이 설치본에도 바로 반영된다.
+
+```bash
+python3 tools/generate_terrain_course.py
+```
+
 SLAM과 Nav2를 함께 띄우고 RViz에서 지도·경로를 보려면 `simulation_bringup`에
 저장 지도를 비워 전달하고 이 장면을 지정한다.
 
 ```bash
 ros2 launch simulation_bringup bringup.launch.py \
   scene_file:="$(ros2 pkg prefix b2_mujoco)/share/b2_mujoco/models/b2_terrain_course_scene.xml" \
-  'map:= ' slam:=true nav2:=true rviz_profile:=slam_nav2
+  map:=none slam:=true nav2:=true rviz_profile:=slam_nav2
 ```
 
 `slam_nav2` RViz 프로필은 SLAM 지도와 Nav2 경로·goal 도구를 함께 표시한다.
