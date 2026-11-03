@@ -28,7 +28,9 @@ import numpy as np
 import b2_mujoco._venv  # noqa: F401
 import onnxruntime as ort
 import rclpy
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, TwistStamped
+from nav_msgs.msg import Odometry
+from b2_mujoco.velocity_servo import VelocityServo
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor, FloatingPointRange
@@ -87,7 +89,7 @@ class B2PolicyRunner(Node):
     self.declare_parameter("control_rate_hz", 50.0)
     self.declare_parameter("gait_period", 0.7)
     self.declare_parameter("gait_activation_threshold", 0.1, ParameterDescriptor(
-      description="Command norm below which gait phase stays at standstill; simulation Nav2 may need 0.02.",
+      description="Command norm below which the original policy stays at standstill (without velocity feedback).",
       floating_point_range=[FloatingPointRange(from_value=0.001, to_value=0.1, step=0.0)],
     ))
     # Command clamps: the velocity range the policy was trained over.
@@ -98,6 +100,10 @@ class B2PolicyRunner(Node):
     self.declare_parameter("cmd_vel_timeout", 0.5)
     self.declare_parameter("auto_start", True)
     self.declare_parameter("damping_duration", 0.5)
+    # Explicit simulator-only opt-in. Never infer this from the navigation mode.
+    self.declare_parameter("velocity_feedback_topic", "")
+    self.declare_parameter("velocity_feedback_frame", "base_link")
+    self.declare_parameter("velocity_feedback_timeout", 0.25)
 
     policy_file = self.get_parameter("policy_file").value
     if not Path(policy_file).is_file():
@@ -121,6 +127,19 @@ class B2PolicyRunner(Node):
     self._mode = "damping"
     self._mode_t = 0.0
     self._stand_start_q: np.ndarray | None = None
+    self._velocity = None
+    self._velocity_stamp = 0.
+    self._servo = None
+    feedback_topic = self.get_parameter("velocity_feedback_topic").value
+    if feedback_topic:
+      self._servo = VelocityServo(
+        [self.get_parameter("min_lin_vel_x").value,
+         -self.get_parameter("max_lin_vel_y").value,
+         -self.get_parameter("max_ang_vel_z").value],
+        [self.get_parameter("max_lin_vel_x").value,
+         self.get_parameter("max_lin_vel_y").value,
+         self.get_parameter("max_ang_vel_z").value],
+      )
 
     sensor_qos = QoSProfile(
       history=QoSHistoryPolicy.KEEP_LAST,
@@ -136,6 +155,9 @@ class B2PolicyRunner(Node):
     self.create_subscription(
       Twist, self.get_parameter("cmd_vel_topic").value, self._on_cmd_vel, 10
     )
+    if feedback_topic:
+      self.create_subscription(Odometry, feedback_topic, self._on_velocity, sensor_qos)
+      self._policy_command_pub = self.create_publisher(TwistStamped, "/b2/policy_command", 10)
     self.create_subscription(String, "/b2/mode", self._on_mode, 10)
     # Latched: a late subscriber still sees which state the FSM is in.
     self.mode_pub = self.create_publisher(
@@ -222,7 +244,33 @@ class B2PolicyRunner(Node):
                 -self.get_parameter("max_ang_vel_z").value,
                 self.get_parameter("max_ang_vel_z").value),
       ])
+      if not np.isfinite(self._cmd).all():
+        self._cmd[:] = 0.
       self._cmd_stamp = self._now()
+
+  def _on_velocity(self, msg: Odometry) -> None:
+    stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+    twist = msg.twist.twist
+    velocity = np.array([twist.linear.x, twist.linear.y, twist.angular.z])
+    age = self._now() - stamp
+    valid = (msg.child_frame_id == self.get_parameter("velocity_feedback_frame").value
+             and np.isfinite(velocity).all()
+             and -.05 <= age <= self.get_parameter("velocity_feedback_timeout").value)
+    with self._lock:
+      # Replayed samples must not refresh freshness or overwrite newer feedback.
+      if valid and stamp > self._velocity_stamp:
+        self._velocity, self._velocity_stamp = velocity, stamp
+      elif not valid:
+        self._velocity = None
+
+  def _publish_policy_input(self, cmd: np.ndarray) -> None:
+    diagnostic = TwistStamped()
+    diagnostic.header.stamp = self.get_clock().now().to_msg()
+    diagnostic.header.frame_id = self.get_parameter("velocity_feedback_frame").value
+    diagnostic.twist.linear.x = float(cmd[0])
+    diagnostic.twist.linear.y = float(cmd[1])
+    diagnostic.twist.angular.z = float(cmd[2])
+    self._policy_command_pub.publish(diagnostic)
 
   def _on_mode(self, msg: String) -> None:
     mode = msg.data.strip().lower()
@@ -237,6 +285,8 @@ class B2PolicyRunner(Node):
   def _enter_mode(self, mode: str) -> None:
     self._mode = mode
     self._mode_t = 0.0
+    if self._servo is not None:
+      self._servo.reset()
     if mode == "stand":
       self._stand_start_q = None
     if mode == "policy":
@@ -250,11 +300,13 @@ class B2PolicyRunner(Node):
       state = self._state
       cmd = self._cmd.copy()
       cmd_stamp = self._cmd_stamp
+      velocity = None if self._velocity is None else self._velocity.copy()
+      velocity_age = self._now() - self._velocity_stamp
     if state is None:
       return
 
     self._mode_t += self.dt
-    if self._now() - cmd_stamp > self.cmd_timeout:
+    if not 0. <= self._now() - cmd_stamp <= self.cmd_timeout:
       cmd = np.zeros(3)
 
     q_sdk = np.array([state.motor_state[i].q for i in range(NUM_MOTORS)])
@@ -273,7 +325,13 @@ class B2PolicyRunner(Node):
       self._stand_step(q_sdk)
       return
 
-    self._policy_step(state, q_sdk, dq_sdk, cmd)
+    walking = None
+    if self._servo is not None:
+      if not -.05 <= velocity_age <= self.get_parameter("velocity_feedback_timeout").value:
+        velocity = None
+      cmd, walking = self._servo.step(cmd, velocity, self.dt)
+      self._publish_policy_input(cmd)
+    self._policy_step(state, q_sdk, dq_sdk, cmd, walking)
 
   def _stand_step(self, q_sdk: np.ndarray) -> None:
     """Scripted fold-and-stand, interpolated from the pose we started in."""
@@ -299,7 +357,8 @@ class B2PolicyRunner(Node):
       self._enter_mode("policy")
 
   def _policy_step(
-    self, state: LowState, q_sdk: np.ndarray, dq_sdk: np.ndarray, cmd: np.ndarray
+    self, state: LowState, q_sdk: np.ndarray, dq_sdk: np.ndarray, cmd: np.ndarray,
+    walking: bool | None = None,
   ) -> None:
     gyro = np.asarray(state.imu_state.gyroscope, dtype=np.float64)
     grav = _quat_to_projected_gravity(
@@ -308,7 +367,9 @@ class B2PolicyRunner(Node):
 
     # Training zeroes the gait phase whenever the command is below the standing
     # threshold, so the policy learns a distinct stand-still behaviour.
-    if np.linalg.norm(cmd) < self.get_parameter("gait_activation_threshold").value:
+    if walking is None:
+      walking = np.linalg.norm(cmd) >= self.get_parameter("gait_activation_threshold").value
+    if not walking:
       phase = np.zeros(2)
     else:
       theta = 2.0 * math.pi * (

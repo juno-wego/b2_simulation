@@ -11,7 +11,7 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
-        ("share/" + package_name + "/docs", ["README_camera.md"]),
+        ("share/" + package_name + "/docs", ["README_camera.md", "README_velocity.md"]),
         ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
         ("share/" + package_name + "/config", glob("config/*.yaml")),
         ("share/" + package_name + "/rviz", glob("rviz/*.rviz")),

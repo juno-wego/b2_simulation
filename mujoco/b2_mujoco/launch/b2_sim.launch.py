@@ -30,6 +30,7 @@ def generate_launch_description():
             use_sim_time,
             {
                 "scene_file": LaunchConfiguration("scene_file"),
+                "lidar_frame": LaunchConfiguration("lidar_frame"),
                 "viewer": LaunchConfiguration("viewer"),
                 "publish_ground_truth_tf": LaunchConfiguration("ground_truth_tf"),
                 "front_camera_enabled": ParameterValue(
@@ -47,6 +48,7 @@ def generate_launch_description():
         parameters=[
             use_sim_time,
             {"policy_file": LaunchConfiguration("policy_file"),
+             "velocity_feedback_topic": "/b2/odom_gt",
              "gait_activation_threshold": ParameterValue(
                  LaunchConfiguration("gait_activation_threshold"), value_type=float)},
         ],
@@ -69,6 +71,7 @@ def generate_launch_description():
                         "unitree_rl_mjlab).",
         ),
         DeclareLaunchArgument("gait_activation_threshold", default_value="0.1"),
+        DeclareLaunchArgument("lidar_frame", default_value="b2/lidar_link"),
         DeclareLaunchArgument(
             "viewer", default_value="true", description="Open the MuJoCo viewer window."
         ),
