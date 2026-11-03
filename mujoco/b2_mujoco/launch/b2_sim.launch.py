@@ -46,7 +46,9 @@ def generate_launch_description():
         output="screen",
         parameters=[
             use_sim_time,
-            {"policy_file": LaunchConfiguration("policy_file")},
+            {"policy_file": LaunchConfiguration("policy_file"),
+             "gait_activation_threshold": ParameterValue(
+                 LaunchConfiguration("gait_activation_threshold"), value_type=float)},
         ],
     )
 
@@ -66,6 +68,7 @@ def generate_launch_description():
             description="Trained B2 velocity policy (ONNX, exported by "
                         "unitree_rl_mjlab).",
         ),
+        DeclareLaunchArgument("gait_activation_threshold", default_value="0.1"),
         DeclareLaunchArgument(
             "viewer", default_value="true", description="Open the MuJoCo viewer window."
         ),

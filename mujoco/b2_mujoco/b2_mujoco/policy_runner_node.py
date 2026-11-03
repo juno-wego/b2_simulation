@@ -31,6 +31,7 @@ import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rcl_interfaces.msg import ParameterDescriptor, FloatingPointRange
 from rclpy.qos import (
   QoSDurabilityPolicy,
   QoSHistoryPolicy,
@@ -85,6 +86,10 @@ class B2PolicyRunner(Node):
     self.declare_parameter("cmd_vel_topic", "/cmd_vel")
     self.declare_parameter("control_rate_hz", 50.0)
     self.declare_parameter("gait_period", 0.7)
+    self.declare_parameter("gait_activation_threshold", 0.1, ParameterDescriptor(
+      description="Command norm below which gait phase stays at standstill; simulation Nav2 may need 0.02.",
+      floating_point_range=[FloatingPointRange(from_value=0.001, to_value=0.1, step=0.0)],
+    ))
     # Command clamps: the velocity range the policy was trained over.
     self.declare_parameter("max_lin_vel_x", 1.5)
     self.declare_parameter("min_lin_vel_x", -1.0)
@@ -303,7 +308,7 @@ class B2PolicyRunner(Node):
 
     # Training zeroes the gait phase whenever the command is below the standing
     # threshold, so the policy learns a distinct stand-still behaviour.
-    if np.linalg.norm(cmd) < 0.1:
+    if np.linalg.norm(cmd) < self.get_parameter("gait_activation_threshold").value:
       phase = np.zeros(2)
     else:
       theta = 2.0 * math.pi * (
